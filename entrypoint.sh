@@ -11,7 +11,6 @@ export LABEL_mongo="${SERVICE}"
 export ENGINE_mongo=mongo@dbgate-plugin-mongo
 export SINGLE_CONNECTION=mongo
 export SINGLE_DATABASE="${SERVICE}"
-export READONLY_mongo=1
 # A caller can set URL_mongo for a local database. ECS does not set it.
 if [ -z "${URL_mongo:-}" ]; then
   export URL_mongo="mongodb://protected-mongo-01.${ENVIRONMENT}.protected.cdp:27017,protected-mongo-02.${ENVIRONMENT}.protected.cdp:27017,protected-mongo-03.${ENVIRONMENT}.protected.cdp:27017/${SERVICE}?authSource=\$external&authMechanism=MONGODB-AWS&tls=true&readPreference=secondaryPreferred&tlsAllowInvalidCertificates=true"

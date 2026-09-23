@@ -16,7 +16,7 @@ The webshell lambda sets these environment variables. This image must honour the
 - `SERVICE` — tenant / database name and IAM identity
 - `ENVIRONMENT` — used to build the protected mongo hostnames
 
-`READONLY_mongo=1` is set so the UI is read-only.
+Set `READONLY_mongo=1` to make the DbGate UI read-only.
 
 ## Local
 
