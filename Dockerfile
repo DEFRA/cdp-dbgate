@@ -9,7 +9,9 @@ ENV NODE_PATH=/opt/node-extra/node_modules
 
 WORKDIR /home/dbgate-docker
 # Decline usage analytics before bundle.js reads dbgateUsageAnalyticsConsent.
-RUN sed -i "/window.dbgate_page = '';/a try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false'); } catch (e) {}" public/index.html
+# Fail the build if DbGate no longer has the line we insert after.
+RUN sed -i "/window.dbgate_page = '';/a try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false'); } catch (e) {}" public/index.html \
+ && grep -q "dbgateUsageAnalyticsConsent" public/index.html
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
