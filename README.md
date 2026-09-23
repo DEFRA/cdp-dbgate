@@ -16,8 +16,6 @@ The webshell lambda sets these environment variables. This image must honour the
 - `SERVICE` — tenant / database name and IAM identity
 - `ENVIRONMENT` — used to build the protected mongo hostnames
 
-`READONLY_mongo=1` is set so the UI is read-only.
-
 ## Local
 
 `run-local.sh` starts this image against Mongo on the laptop (`127.0.0.1:27017`) and registers the Portal session token with the webshell proxy.
