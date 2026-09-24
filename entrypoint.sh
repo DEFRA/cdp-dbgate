@@ -18,4 +18,12 @@ fi
 
 echo "starting dbgate PORT=${PORT} WEB_ROOT=${WEB_ROOT} SERVICE=${SERVICE} ENVIRONMENT=${ENVIRONMENT}"
 
+# DbGate call api.dbgate.cloud on every UI load (public files + promo widget). Through the CDP forwarder that fails
+# with axios "Unsupported protocol file:" and a snackbar toast.
+# LOCAL_DBGATE_CLOUD makes DbGate use http://localhost:3110 instead; we serve empty OK responses there.
+export LOCAL_DBGATE_CLOUD=1
+export NO_PROXY="127.0.0.1,localhost${NO_PROXY:+,${NO_PROXY}}"
+export no_proxy="${NO_PROXY}"
+node /opt/cdp/cloud-stub.js &
+
 exec node bundle.js --listen-api
