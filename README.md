@@ -18,6 +18,8 @@ The webshell lambda sets these environment variables. This image must honour the
 
 Set `READONLY_mongo=1` to make the DbGate UI read-only.
 
+On startup DbGate tries to refresh “public cloud” files and a promo widget from `api.dbgate.cloud`. In CDP that call goes via the sidecar HTTP proxy and fails with a brief UI toast (`Unsupported protocol file:`). This image sets `LOCAL_DBGATE_CLOUD` and runs a tiny stub on `127.0.0.1:3110` so those requests succeed with empty data instead.
+
 ## Local
 
 `run-local.sh` starts this image against Mongo on the laptop (`127.0.0.1:27017`) and registers the Portal session token with the webshell proxy.
