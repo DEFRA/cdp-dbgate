@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+# Lambda sets PORT=8085, TOKEN, SERVICE, ENVIRONMENT.
+# DbGate docker uses process.env.PORT (default 3000). Do not bind 8085 twice.
 # Audit shutdown upload: same pattern as cdp-webshell/entrypoint.sh
 audit_path=/var/log/webshell
 mkdir -p "$audit_path"
