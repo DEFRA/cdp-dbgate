@@ -1,0 +1,73 @@
+services:
+  mongo:
+    image: mongo:7.0.28
+    profiles: ["mongo"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.hello().ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    volumes:
+      - ./dev/mongo-seed.js:/docker-entrypoint-initdb.d/mongo-seed.js:ro
+
+  redis:
+    image: redis:7.2.3-alpine3.18
+    profiles: ["redis"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "PING"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+
+  redis-seed:
+    image: redis:7.2.3-alpine3.18
+    profiles: ["redis"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/seed/redis-seed.sh"]
+    volumes:
+      - ./dev/redis-seed.sh:/seed/redis-seed.sh:ro
+    restart: "no"
+
+  dbgate-mongo:
+    build: .
+    image: cdp-dbgate:local
+    profiles: ["mongo"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    environment:
+      PORT: 8085
+      TOKEN: demo
+      SERVICE: demo-service
+      ENVIRONMENT: local
+      USER_ID: local-user
+      DBGATE_ENGINE: mongo
+      URL_mongo: mongodb://mongo:27017/demo-service
+
+  dbgate-redis:
+    build: .
+    image: cdp-dbgate:local
+    profiles: ["redis"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      redis-seed:
+        condition: service_completed_successfully
+    ports:
+      - "8086:8085"
+    environment:
+      PORT: 8085
+      TOKEN: demo
+      SERVICE: demo-service
+      ENVIRONMENT: local
+      USER_ID: local-user
+      DBGATE_ENGINE: redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_TLS: "false"
