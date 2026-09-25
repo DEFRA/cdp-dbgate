@@ -25,6 +25,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Unit tests
+        run: node --test
+
       - name: Docker Login
         uses: DEFRA/cdp-build-action/docker-login@main
         with:
