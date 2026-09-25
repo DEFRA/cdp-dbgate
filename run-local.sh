@@ -17,6 +17,9 @@ ENVIRONMENT="${ENVIRONMENT:-infra-dev}"
 IMAGE="${IMAGE:-cdp-dbgate}"
 PROXY_URL="${PROXY_URL:-http://localhost:8000}"
 MONGO_URL="${MONGO_URL:-mongodb://host.docker.internal:27017/${SERVICE}?tls=false}"
+AUDIT_UPLOAD_URL="${AUDIT_UPLOAD_URL:-}"
+# Lambda sets USER_ID in ECS. For local / stubs, default so audit lines show a user.
+USER_ID="${USER_ID:-local-user}"
 
 if [ -z "$TOKEN" ]; then
   echo "usage: $0 <token-or-portal-url> [service]" >&2
@@ -43,7 +46,9 @@ docker run -d --name "$NAME" \
   -e TOKEN="$TOKEN" \
   -e SERVICE="$SERVICE" \
   -e ENVIRONMENT="$ENVIRONMENT" \
+  -e USER_ID="$USER_ID" \
   -e URL_mongo="$MONGO_URL" \
+  -e AUDIT_UPLOAD_URL="$AUDIT_UPLOAD_URL" \
   "$IMAGE"
 
 echo "waiting for http://localhost:8085/${TOKEN}"

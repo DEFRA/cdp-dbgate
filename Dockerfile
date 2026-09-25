@@ -3,6 +3,9 @@
 # node_modules — npm install in /home/dbgate-docker broke the previous image.
 FROM dbgate/dbgate
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /opt/node-extra
 RUN npm init -y && npm install aws4
 ENV NODE_PATH=/opt/node-extra/node_modules
@@ -12,6 +15,7 @@ WORKDIR /home/dbgate-docker
 # Fail the build if DbGate no longer has the line we insert after.
 RUN sed -i "/window.dbgate_page = '';/a try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false'); } catch (e) {}" public/index.html \
  && grep -q "dbgateUsageAnalyticsConsent" public/index.html
+COPY mongo-audit-preload.js /opt/cdp-audit/mongo-audit-preload.js
 COPY cloud-stub.js /opt/cdp/cloud-stub.js
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
