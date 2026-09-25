@@ -2,10 +2,8 @@
 set -euo pipefail
 
 # Audit shutdown upload: same pattern as cdp-webshell/entrypoint.sh
-# (trap + wait, tar *.audit, curl PUT to base64-decoded AUDIT_UPLOAD_URL).
 audit_path=/var/log/webshell
 mkdir -p "$audit_path"
-# mongo-audit-preload.js writes here; the *.audit glob below picks it up.
 export AUDIT_LOG_PATH="${audit_path}/mongo.audit"
 
 _term() {
@@ -16,9 +14,6 @@ _term() {
 trap _term SIGTERM
 trap _term SIGINT
 
-# Lambda sets PORT=8085, TOKEN, SERVICE, ENVIRONMENT.
-# DbGate docker uses process.env.PORT (default 3000). Do not bind 8085 twice.
-
 export SKIP_ALL_AUTH=1
 export WEB_ROOT="/${TOKEN}"
 export CONNECTIONS=mongo
@@ -26,7 +21,7 @@ export LABEL_mongo="${SERVICE}"
 export ENGINE_mongo=mongo@dbgate-plugin-mongo
 export SINGLE_CONNECTION=mongo
 export SINGLE_DATABASE="${SERVICE}"
-# A caller can set URL_mongo for a local database. ECS does not set it.
+
 if [ -z "${URL_mongo:-}" ]; then
   export URL_mongo="mongodb://protected-mongo-01.${ENVIRONMENT}.protected.cdp:27017,protected-mongo-02.${ENVIRONMENT}.protected.cdp:27017,protected-mongo-03.${ENVIRONMENT}.protected.cdp:27017/${SERVICE}?authSource=\$external&authMechanism=MONGODB-AWS&tls=true&readPreference=secondaryPreferred&tlsAllowInvalidCertificates=true"
 fi
@@ -49,8 +44,7 @@ child=$!
 
 child_exit=0
 wait "$child" || child_exit=$?
-# A trapped signal makes the first wait return before node exits; wait again so the
-# audit file is complete before it is tarred.
+# A trapped signal makes the first wait return before node exits; wait again so the audit file is complete before it is tarred.
 wait "$child" 2>/dev/null || true
 
 if [ -n "${AUDIT_UPLOAD_URL:-}" ]; then
