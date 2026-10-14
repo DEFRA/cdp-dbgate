@@ -24,7 +24,7 @@ const server = http.createServer((req, res) => {
   res.end(body)
 })
 
-server.on('error', err => {
+server.on('error', (err) => {
   // Don't take down the container over this — DbGate's cloud calls will just
   // go back to failing against the real api.dbgate.cloud (toast returns, but
   // Mongo browsing still works).

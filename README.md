@@ -1,11 +1,11 @@
 # cdp-dbgate
 
-This is a container based on [DbGate](https://github.com/dbgate/dbgate) that runs a MongoDB web UI in a way that works
-with the cdp-webshell launcher.
+This is a container based on [DbGate](https://github.com/dbgate/dbgate) that runs MongoDB and Redis web UIs in a way
+that works with the cdp-webshell launcher.
 
 ## Whats in it?
 
-- `dbgate`: web-ui for interacting with MongoDB
+- `dbgate`: web-ui for interacting with MongoDB and Redis
 - `aws4`: Node helper used by the mongo driver for `MONGODB-AWS` auth
 
 ## Setup/config
@@ -19,24 +19,48 @@ The webshell lambda sets these environment variables. This image must honour the
 
 ### Optional
 
+- `DBGATE_ENGINE` — `mongo` (default) or `redis`
 - `READONLY_mongo=1` — makes the DbGate UI read-only. Not set today (users have write access); add it to the task
   environment if a read-only session is ever needed.
 
+When `DBGATE_ENGINE=redis`:
+
+- `REDIS_HOST` (required) — hostname of the Redis endpoint
+- `REDIS_PORT` (optional, default `6379`)
+- `REDIS_TLS` (optional, TLS is on unless set to `false`, e.g. for plain local Redis)
+- `REDIS_USERNAME` and `REDIS_PASSWORD` (optional; used when present)
+
+### Redis is pinned to `db0`
+
+A Redis server has numbered logical databases, `db0` to `db15` by default. Each holds its own keys, and a client
+switches between them with `SELECT`. DbGate lists all of them, even empty ones.
+
+CDP Redis (ElastiCache) runs in cluster mode, which only supports `db0`. Tenants share it and are kept apart by key
+prefix: each service's Redis user can only access keys starting with its own prefix (`REDIS_KEY_PREFIX`).
+`entrypoint.sh` therefore sets `SINGLE_DATABASE=db0` (same pattern as Mongo), so DbGate opens `db0` directly and
+doesn't list the other databases.
+
 ## Audit logging
 
-`mongo-audit-preload.js` is loaded into DbGate with `NODE_OPTIONS=--require`. It wraps the driver's `MongoClient` and
-logs every command as one JSON line with `msg: "mongo.command"`. Handshake and auth commands (`hello`, `ping`,
-`saslStart`, …) are skipped. Each line carries `userId` (from `USER_ID`), `service`, `environment` and `token`.
+Each engine has a preload that `entrypoint.sh` loads into DbGate with `NODE_OPTIONS=--require`. Both write through
+`audit-log.js`, one JSON line per command, carrying `userId` (from `USER_ID`), `service`, `environment` and `token`.
 
-- The full line, including the `command` body, goes to `AUDIT_LOG_PATH`, which `entrypoint.sh` sets to
-  `/var/log/webshell/mongo.audit`. This file is the audit record uploaded to S3.
-- The same line without `command` goes to stdout (docker logs / Firelens → OpenSearch), so document bodies that may
+| Engine | Preload                  | Hooks                                 | `msg`           | Body field | Skipped                                                     |
+| ------ | ------------------------ | ------------------------------------- | --------------- | ---------- | ----------------------------------------------------------- |
+| Mongo  | `mongo-audit-preload.js` | driver `MongoClient` events           | `mongo.command` | `command`  | `hello`, `ping`, `saslStart`, …                             |
+| Redis  | `redis-audit-preload.js` | ioredis `Redis.prototype.sendCommand` | `redis.command` | `args`     | `auth`, `hello`, `ping`, `select`, `client`, `info`, `quit` |
+
+Redis `auth` and `hello` carry the password, so they are never logged.
+
+- The full line, including the body field, goes to `AUDIT_LOG_PATH`, which `entrypoint.sh` sets to
+  `/var/log/webshell/<engine>.audit`. This file is the audit record uploaded to S3.
+- The same line without the body goes to stdout (docker logs / Firelens → OpenSearch), so values that may
   contain personal data stay out of the general log store.
 - On `SIGTERM`/`SIGINT`, `entrypoint.sh` waits for DbGate to exit, tars `*.audit` into `/var/log/webshell/audit.tgz`
   and `PUT`s it to the base64-decoded `AUDIT_UPLOAD_URL` (a presigned S3 URL from the webshell lambda). A failed
   upload is logged by `curl`.
 
-Tests use the built-in Node runner, no dependencies or Mongo needed:
+Tests use the built-in Node runner, no dependencies, Mongo or Redis needed:
 
 ```bash
 node --test
@@ -51,17 +75,47 @@ through the sidecar HTTP proxy, where that call fails and DbGate shows a toast (
 `cloud-stub.js` there to answer with empty data. `localhost` is added to `NO_PROXY` so the stub is reached directly.
 The image also turns off DbGate usage analytics at build time (see `Dockerfile`).
 
-## Local
+## Local run (standalone, no other deps)
 
-`run-local.sh` starts this image against Mongo on the laptop (`127.0.0.1:27017`) and registers the Portal session token
-with the webshell proxy. `USER_ID` defaults to `local-user`.
+This starts only `cdp-dbgate`, Mongo and Redis from this repository. Pick one or both with a profile:
 
 ```bash
+docker compose --profile redis up -d --build                    # Redis only
+docker compose --profile mongo up -d --build                    # Mongo only
+docker compose --profile redis --profile mongo up -d --build    # both
+```
+
+- Mongo UI: `http://localhost:8085/demo/`
+- Redis UI: `http://localhost:8086/demo/`
+
+Each profile seeds demo data into its backend. Stop with the same profiles, e.g.
+`docker compose --profile redis --profile mongo down -v`.
+
+## Local
+
+`run-local.sh` starts this image and registers the Portal session token with the webshell proxy. `USER_ID` defaults to
+`local-user`. It runs `cdp-dbgate:local` (override with `IMAGE`), the same tag `docker compose` builds.
+
+```bash
+docker build -t cdp-dbgate:local .
 ./run-local.sh <token-or-portal-url> [service]
 ```
 
 `service` defaults to `cdp-portal-backend`. Launch **MongoDB Web UI** in the local Portal first, then pass the token
 from the browser URL. The webshell proxy must already be running on `http://localhost:8000`.
+Register always sends `owner_id`, which the proxy checks when `USER_AUTH_ENABLED=true` (default: journey-tests
+Admin User `90552794-0613-4023-819a-512aa9d40023`). Override with `OWNER_ID` if you log in as
+someone else.
+
+Use `DBGATE_ENGINE` to choose local Mongo or Redis:
+
+```bash
+# Mongo mode (default)
+./run-local.sh <token-or-portal-url> [service]
+
+# Redis mode against journey-tests/local Redis
+DBGATE_ENGINE=redis REDIS_HOST=host.docker.internal REDIS_PORT=6379 REDIS_TLS=false ./run-local.sh <token-or-portal-url> cdp-portal-frontend
+```
 
 ### Local audit upload (floci)
 

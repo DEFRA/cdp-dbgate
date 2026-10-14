@@ -3,8 +3,8 @@
 // Audit Mongo driver commands to stdout (docker logs / Firelens) and to AUDIT_LOG_PATH,
 // which entrypoint.sh uploads on shutdown. Loaded via NODE_OPTIONS=--require before DbGate starts.
 
-const fs = require('fs')
 const Module = require('module')
+const { audit, AUDIT_LOG_PATH } = require('./audit-log')
 
 const SKIP = new Set([
   'hello',
@@ -16,53 +16,21 @@ const SKIP = new Set([
   'endSessions'
 ])
 
-// Set by entrypoint.sh, which also creates the directory and owns the upload. Unset means stdout only.
-const AUDIT_LOG_PATH = process.env.AUDIT_LOG_PATH
-
-// DbGate turns large integers into BigInt, which plain JSON.stringify throws on. A throw here
-// would surface in the driver and fail the user's query.
-function toJson(value) {
-  return JSON.stringify(value, (_key, v) => (typeof v === 'bigint' ? v.toString() : v))
-}
-
-function writeAuditLine(line) {
-  if (!AUDIT_LOG_PATH) {
-    return
-  }
-  try {
-    fs.appendFileSync(AUDIT_LOG_PATH, `${line}\n`)
-  } catch (err) {
-    console.log(
-      JSON.stringify({
-        msg: 'mongo.audit.write.error',
-        path: AUDIT_LOG_PATH,
-        error: err && err.message
-      })
-    )
-  }
-}
-
 function onCommandStarted(event) {
   if (SKIP.has(event.commandName)) {
     return
   }
 
-  const entry = {
-    msg: 'mongo.command',
-    ts: new Date().toISOString(),
-    commandName: event.commandName,
-    databaseName: event.databaseName,
-    requestId: event.requestId,
-    command: event.command,
-    userId: process.env.USER_ID || null,
-    service: process.env.SERVICE,
-    environment: process.env.ENVIRONMENT,
-    token: process.env.TOKEN
-  }
-
-  // Full command (may contain document bodies) goes only to the S3 audit file; stdout feeds OpenSearch.
-  writeAuditLine(toJson(entry))
-  console.log(toJson({ ...entry, command: undefined }))
+  audit(
+    'mongo',
+    {
+      commandName: event.commandName,
+      databaseName: event.databaseName,
+      requestId: event.requestId,
+      command: event.command
+    },
+    'command'
+  )
 }
 
 function installAuditedClient(exports, Original) {

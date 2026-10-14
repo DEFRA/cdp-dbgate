@@ -14,12 +14,19 @@ set -euo pipefail
 TOKEN="${1:-}"
 SERVICE="${2:-cdp-portal-backend}"
 ENVIRONMENT="${ENVIRONMENT:-infra-dev}"
-IMAGE="${IMAGE:-cdp-dbgate}"
+IMAGE="${IMAGE:-cdp-dbgate:local}"
 PROXY_URL="${PROXY_URL:-http://localhost:8000}"
+DBGATE_ENGINE="${DBGATE_ENGINE:-mongo}"
 MONGO_URL="${MONGO_URL:-mongodb://host.docker.internal:27017/${SERVICE}?tls=false}"
+REDIS_HOST="${REDIS_HOST:-host.docker.internal}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+REDIS_TLS="${REDIS_TLS:-false}"
 AUDIT_UPLOAD_URL="${AUDIT_UPLOAD_URL:-}"
 # Lambda sets USER_ID in ECS. For local / stubs, default so audit lines show a user.
 USER_ID="${USER_ID:-local-user}"
+# Webshell-proxy owner check (USER_AUTH_ENABLED). Must match Portal credentials.id /
+# cdpShellAuth cookie oid. Default is journey-tests "Admin User".
+OWNER_ID="${OWNER_ID:-90552794-0613-4023-819a-512aa9d40023}"
 
 if [ -z "$TOKEN" ]; then
   echo "usage: $0 <token-or-portal-url> [service]" >&2
@@ -39,16 +46,40 @@ fi
 NAME="cdp-dbgate-local"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
+env_args=(
+  -e PORT=8085
+  -e TOKEN="$TOKEN"
+  -e SERVICE="$SERVICE"
+  -e ENVIRONMENT="$ENVIRONMENT"
+  -e USER_ID="$USER_ID"
+  -e DBGATE_ENGINE="$DBGATE_ENGINE"
+  -e AUDIT_UPLOAD_URL="$AUDIT_UPLOAD_URL"
+)
+
+case "$DBGATE_ENGINE" in
+  mongo)
+    env_args+=(-e URL_mongo="$MONGO_URL")
+    ;;
+  redis)
+    env_args+=(
+      -e REDIS_HOST="$REDIS_HOST"
+      -e REDIS_PORT="$REDIS_PORT"
+      -e REDIS_TLS="$REDIS_TLS"
+      # Bare -e copies the value from this shell (if set) and keeps the password out of the docker command line.
+      -e REDIS_USERNAME
+      -e REDIS_PASSWORD
+    )
+    ;;
+  *)
+    echo "unsupported DBGATE_ENGINE '${DBGATE_ENGINE}', expected mongo or redis" >&2
+    exit 1
+    ;;
+esac
+
 docker run -d --name "$NAME" \
   -p "8085:8085" \
   --add-host=host.docker.internal:host-gateway \
-  -e PORT=8085 \
-  -e TOKEN="$TOKEN" \
-  -e SERVICE="$SERVICE" \
-  -e ENVIRONMENT="$ENVIRONMENT" \
-  -e USER_ID="$USER_ID" \
-  -e URL_mongo="$MONGO_URL" \
-  -e AUDIT_UPLOAD_URL="$AUDIT_UPLOAD_URL" \
+  "${env_args[@]}" \
   "$IMAGE"
 
 echo "waiting for http://localhost:8085/${TOKEN}"
@@ -71,9 +102,9 @@ if [ "$ready" -ne 1 ]; then
 fi
 
 if curl -fsS -u testuser:testpass -H 'Content-type: application/json' \
-  -d "{\"id\":\"${TOKEN}\",\"target\":\"localhost\",\"image\":\"cdp-dbgate\"}" \
+  -d "{\"id\":\"${TOKEN}\",\"owner_id\":\"${OWNER_ID}\",\"target\":\"localhost\",\"image\":\"cdp-dbgate\"}" \
   "${PROXY_URL}/admin/register" >/dev/null; then
-  echo "registered ${TOKEN} with ${PROXY_URL}"
+  echo "registered ${TOKEN} with ${PROXY_URL} (owner_id=${OWNER_ID})"
 else
   echo "proxy register failed (${PROXY_URL}). Start cdp-webshell-proxy, then re-run this script." >&2
 fi
