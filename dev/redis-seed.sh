@@ -21,5 +21,7 @@ redis_cli EXPIRE "${prefix}:ttl:session" 900
 redis_cli SET "${prefix}:tree:app:cache:hit-rate" "0.97"
 redis_cli SET "${prefix}:tree:app:cache:miss-rate" "0.03"
 redis_cli SET "${prefix}:tree:worker:queue:depth" "12"
+# Another tenant's key. DbGate should not list it.
+redis_cli SET "other-service:string:hidden" "not-yours"
 
 echo "redis seed complete"

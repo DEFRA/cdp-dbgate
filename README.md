@@ -40,6 +40,19 @@ prefix: each service's Redis user can only access keys starting with its own pre
 `entrypoint.sh` therefore sets `SINGLE_DATABASE=db0` (same pattern as Mongo), so DbGate opens `db0` directly and
 doesn't list the other databases.
 
+### Key list is scoped to the service
+
+The service ACL (`on ~<service>:* +@all -@dangerous`) blocks reading or writing other services' keys, but `SCAN` takes
+no key argument, so it returns every key name in the shared cluster. DbGate's key browser runs `SCAN` on open, so
+without scoping it lists every tenant's keys, and theirs open as a blank panel.
+
+`redis-audit-preload.js` rewrites the `MATCH` pattern of every `SCAN` to start with `REDIS_SCAN_PREFIX`
+(`entrypoint.sh` default: `${SERVICE}:`). This covers the key browser, its filter box and `SCAN` typed in the query
+tab. For example, `*` becomes `cdp-portal-frontend:*`.
+
+This is for clarity, not security: the ACL is the control, and the terminal's `redis-cli` can still `SCAN` all key
+names. The key count in the status bar comes from `DBSIZE` and is still cluster-wide.
+
 ## Audit logging
 
 Each engine has a preload that `entrypoint.sh` loads into DbGate with `NODE_OPTIONS=--require`. Both write through
