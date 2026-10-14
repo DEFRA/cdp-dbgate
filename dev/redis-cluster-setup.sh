@@ -24,8 +24,8 @@ redis-cli -h "$primary" CLUSTER ADDSLOTSRANGE 0 16383 || true
 redis-cli -h "$primary" CLUSTER MEET "$(getent hosts "$replica" | awk '{print $1}')" 6379
 
 primary_id="$(redis-cli -h "$primary" CLUSTER MYID)"
-wait_for "redis-cli -h $replica CLUSTER NODES | grep -q $primary_id"
-redis-cli -h "$replica" CLUSTER REPLICATE "$primary_id" || true
+# Fails until gossip tells the replica this node is a master. redis-cli exits 0 on an error reply, so grep for OK.
+wait_for "redis-cli -h $replica CLUSTER REPLICATE $primary_id | grep -q OK"
 wait_for "redis-cli -h $replica CLUSTER INFO | grep -q 'cluster_state:ok'"
 wait_for "redis-cli -h $replica INFO replication | grep -q 'master_link_status:up'"
 

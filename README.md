@@ -60,12 +60,12 @@ The service ACL (`on ~<service>:* +@all -@dangerous`) blocks reading or writing 
 no key argument, so it returns every key name in the shared cluster. DbGate's key browser runs `SCAN` on open, so
 without scoping it lists every tenant's keys, and theirs open as a blank panel.
 
-`redis-audit-preload.js` rewrites the `MATCH` pattern of every `SCAN` to start with `REDIS_SCAN_PREFIX`
-(`entrypoint.sh` default: `${SERVICE}:`). This covers the key browser, its filter box and `SCAN` typed in the query
+`redis-preload.js` rewrites the `MATCH` pattern of every `SCAN` to start with `REDIS_SCAN_PREFIX`
+(`entrypoint.sh` sets it to `${SERVICE}:`). This covers the key browser, its filter box and `SCAN` typed in the query
 tab. For example, `*` becomes `cdp-portal-frontend:*`.
 
 This is for clarity, not security: the ACL is the control, and the terminal's `redis-cli` can still `SCAN` all key
-names. The key count in the status bar comes from `DBSIZE` and is still cluster-wide.
+names. The key list's "Scanned X/Y" total comes from `DBSIZE` and is still cluster-wide.
 
 ## Audit logging
 
@@ -75,7 +75,7 @@ Each engine has a preload that `entrypoint.sh` loads into DbGate with `NODE_OPTI
 | Engine | Preload                  | Hooks                                 | `msg`           | Body field | Skipped                                                     |
 | ------ | ------------------------ | ------------------------------------- | --------------- | ---------- | ----------------------------------------------------------- |
 | Mongo  | `mongo-audit-preload.js` | driver `MongoClient` events           | `mongo.command` | `command`  | `hello`, `ping`, `saslStart`, …                             |
-| Redis  | `redis-audit-preload.js` | ioredis `Redis.prototype.sendCommand` | `redis.command` | `args`     | `auth`, `hello`, `ping`, `select`, `client`, `info`, `quit` |
+| Redis  | `redis-preload.js`       | ioredis `Redis.prototype.sendCommand` | `redis.command` | `args`     | `auth`, `hello`, `ping`, `select`, `client`, `info`, `quit` |
 
 Redis `auth` and `hello` carry the password, so they are never logged.
 

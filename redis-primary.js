@@ -28,6 +28,21 @@ function parseNode(line) {
   }
 }
 
+function isUsablePrimary(node) {
+  if (!node) {
+    return false
+  }
+
+  const isPrimary = node.flags.includes('master')
+  // `fail?` is suspected by the node we asked, `fail` is confirmed by the cluster.
+  const isDown = node.flags.some((flag) => flag.startsWith('fail'))
+  const hasAddress = !node.flags.includes('noaddr')
+  const isReachable = node.connected
+  const holdsData = node.hasSlots
+
+  return isPrimary && !isDown && hasAddress && isReachable && holdsData
+}
+
 // DbGate's free Redis client cannot follow MOVED, so it only works against the one primary
 // that owns every slot. Anything else returns a reason and the caller keeps the endpoint.
 function findPrimary(clusterNodes) {
@@ -35,16 +50,7 @@ function findPrimary(clusterNodes) {
     .split('\n')
     .filter((line) => line.trim())
     .map(parseNode)
-    .filter(
-      (node) =>
-        node &&
-        node.flags.includes('master') &&
-        !node.flags.some(
-          (flag) => flag.startsWith('fail') || flag === 'noaddr'
-        ) &&
-        node.connected &&
-        node.hasSlots
-    )
+    .filter(isUsablePrimary)
 
   if (primaries.length !== 1) {
     return {
