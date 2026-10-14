@@ -1,7 +1,8 @@
 'use strict'
 
 // Audit Redis commands to stdout (docker logs / Firelens) and to AUDIT_LOG_PATH,
-// which entrypoint.sh uploads on shutdown. Loaded via NODE_OPTIONS=--require before DbGate starts.
+// which entrypoint.sh uploads on shutdown. Also scopes SCAN to REDIS_SCAN_PREFIX.
+// Loaded via NODE_OPTIONS=--require before DbGate starts.
 
 const Module = require('module')
 const { audit, AUDIT_LOG_PATH } = require('./audit-log')
@@ -19,7 +20,7 @@ const SKIP = new Set([
 ])
 
 function argToString(arg) {
-  return Buffer.isBuffer(arg) ? arg.toString('utf8') : arg
+  return Buffer.isBuffer(arg) ? arg.toString('utf8') : String(arg)
 }
 
 // ioredis copies the command's args onto a failed command's error (err.command), and DbGate logs that error to stdout.
@@ -38,6 +39,36 @@ function redactCredentialErrors(command) {
     }
     return reject.apply(this, arguments)
   }
+}
+
+// The service's Redis ACL (`~<service>:*`) blocks other services' keys, but SCAN takes no key
+// argument, so it still returns every key name in the shared cluster. Rewrite its MATCH pattern so
+// the key browser and the query tab only list keys this service can open.
+function scopeScan(command) {
+  const prefix = process.env.REDIS_SCAN_PREFIX
+  if (!prefix || String(command.name).toLowerCase() !== 'scan') {
+    return
+  }
+
+  const args = command.args || []
+  // Redis uses the last MATCH, so scope that one.
+  const matchIndex = args.findLastIndex(
+    (arg) => argToString(arg).toLowerCase() === 'match'
+  )
+  if (matchIndex === -1 || matchIndex + 1 >= args.length) {
+    command.args = [...args, 'MATCH', `${prefix}*`]
+    return
+  }
+
+  args[matchIndex + 1] = scopePattern(argToString(args[matchIndex + 1]), prefix)
+}
+
+// DbGate's filter box sends `*<filter>*`, so a pasted key name arrives as `*<prefix>...*`.
+function scopePattern(pattern, prefix) {
+  const unwrapped = pattern.startsWith(`*${prefix}`)
+    ? pattern.slice(1)
+    : pattern
+  return unwrapped.startsWith(prefix) ? unwrapped : `${prefix}${unwrapped}`
 }
 
 function onCommand(command) {
@@ -66,6 +97,11 @@ function patchRedis(Redis) {
 
   const originalSendCommand = proto.sendCommand
   proto.sendCommand = function (command) {
+    try {
+      scopeScan(command)
+    } catch (_) {
+      // Scoping is for clarity only, so a failure must not skip the audit below.
+    }
     try {
       redactCredentialErrors(command)
       onCommand(command)
@@ -105,4 +141,4 @@ console.log(
   })
 )
 
-module.exports = { onCommand, patchRedis }
+module.exports = { onCommand, patchRedis, scopeScan }

@@ -67,6 +67,9 @@ case "${DBGATE_ENGINE}" in
       export PASSWORD_redis="${REDIS_PASSWORD}"
     fi
 
+    # Matches the default service ACL (`~<service>:*`). See redis-audit-preload.js.
+    export REDIS_SCAN_PREFIX="${REDIS_SCAN_PREFIX:-${SERVICE}:}"
+
     # Log Redis commands to stdout and AUDIT_LOG_PATH. See redis-audit-preload.js.
     export AUDIT_LOG_PATH="${audit_path}/redis.audit"
     export NODE_OPTIONS="--require /opt/cdp-audit/redis-audit-preload.js${NODE_OPTIONS:+ ${NODE_OPTIONS}}"
