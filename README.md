@@ -40,6 +40,20 @@ prefix: each service's Redis user can only access keys starting with its own pre
 `entrypoint.sh` therefore sets `SINGLE_DATABASE=db0` (same pattern as Mongo), so DbGate opens `db0` directly and
 doesn't list the other databases.
 
+### DbGate connects to the primary
+
+CDP Redis is one shard: a primary and replicas, behind the configuration endpoint in `REDIS_HOST`. DNS resolves
+that endpoint to any node. A replica answers `SCAN` but replies `MOVED` to key commands (`GET`, `SET`, opening a key).
+`redis-cli -c` follows `MOVED`. DbGate's free Redis client is standalone and does not: the cluster client
+(`Redis.Cluster`) is Premium only.
+
+Before DbGate starts, `entrypoint.sh` runs `redis-primary.js`. It runs `CLUSTER NODES` on the endpoint, takes the one
+primary that owns slots, checks it answers `PING` with the same TLS and credentials, and sets `SERVER_redis` to its
+hostname. If any step fails, or there is more than one shard, it logs `redis.primary` `skipped` with a reason and
+DbGate uses `REDIS_HOST`, as before.
+
+If the primary fails over during a session, that session gets `MOVED` until it is relaunched.
+
 ### Key list is scoped to the service
 
 The service ACL (`on ~<service>:* +@all -@dangerous`) blocks reading or writing other services' keys, but `SCAN` takes
@@ -103,6 +117,18 @@ docker compose --profile redis --profile mongo up -d --build    # both
 
 Each profile seeds demo data into its backend. Stop with the same profiles, e.g.
 `docker compose --profile redis --profile mongo down -v`.
+
+`redis-cluster` is one shard like CDP: `redis-primary` and `redis-replica`, with DbGate pointed at the replica.
+
+```bash
+docker compose --profile redis-cluster up -d --build
+docker compose logs dbgate-redis-cluster | grep redis.primary   # "status":"ok","host":"redis-primary"
+```
+
+Redis Cluster UI: `http://localhost:8087/demo/`. `GET demo-service:string:welcome` returns `"hello-from-the-primary"`.
+To see the problem without the fix, run an image built before it: `DBGATE_IMAGE=<old-tag> docker compose --profile
+redis-cluster up -d --no-build`. The same `GET` fails with `MOVED`. `--no-build` stops compose from building the
+current code under the old tag if that image is missing.
 
 ## Local
 

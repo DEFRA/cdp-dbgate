@@ -46,10 +46,6 @@ case "${DBGATE_ENGINE}" in
     export LABEL_redis="${SERVICE}"
     export ENGINE_redis=redis@dbgate-plugin-redis
     export SINGLE_CONNECTION=redis
-    # CDP Redis is cluster mode with a single shard, so every slot lives on the node behind the
-    # configuration endpoint and DbGate's standalone client works.
-    # DbGate's cluster client is Premium-only, so a multi-shard cluster would need a different approach.
-    export SERVER_redis="${REDIS_HOST}"
     export PORT_redis="${REDIS_PORT:-6379}"
     # Same pattern as mongo: SINGLE_DATABASE opens the DB in the UI. DATABASE_redis alone
     # leaves singleDbConnection null and the UI stuck on "Database not selected".
@@ -66,6 +62,13 @@ case "${DBGATE_ENGINE}" in
     if [ -n "${REDIS_PASSWORD:-}" ]; then
       export PASSWORD_redis="${REDIS_PASSWORD}"
     fi
+
+    # REDIS_HOST is the cluster configuration endpoint, which resolves to any node, replicas included.
+    # DbGate's free client cannot follow MOVED from a replica, so connect it to the primary.
+    # Runs after the *_redis exports above so it checks the primary with DbGate's own settings.
+    # Falls back to REDIS_HOST if the primary cannot be found. See README.
+    primary="$(node /opt/cdp/redis-primary.js || true)"
+    export SERVER_redis="${primary:-${REDIS_HOST}}"
 
     # Matches the default service ACL (`~<service>:*`). See redis-audit-preload.js.
     export REDIS_SCAN_PREFIX="${REDIS_SCAN_PREFIX:-${SERVICE}:}"

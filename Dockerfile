@@ -16,7 +16,7 @@ WORKDIR /home/dbgate-docker
 RUN sed -i "/window.dbgate_page = '';/a try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false'); } catch (e) {}" public/index.html \
  && grep -q "dbgateUsageAnalyticsConsent" public/index.html
 COPY audit-log.js mongo-audit-preload.js redis-audit-preload.js /opt/cdp-audit/
-COPY cloud-stub.js /opt/cdp/cloud-stub.js
+COPY cloud-stub.js redis-primary.js /opt/cdp/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

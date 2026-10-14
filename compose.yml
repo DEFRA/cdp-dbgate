@@ -32,6 +32,30 @@ services:
       - ./dev/redis-seed.sh:/seed/redis-seed.sh:ro
     restart: "no"
 
+  # One shard, primary + replica, cluster mode: like CDP ElastiCache.
+  redis-primary:
+    image: redis:7.2.3-alpine3.18
+    profiles: ["redis-cluster"]
+    command: >-
+      redis-server --cluster-enabled yes --cluster-announce-hostname redis-primary
+      --cluster-preferred-endpoint-type hostname
+
+  redis-replica:
+    image: redis:7.2.3-alpine3.18
+    profiles: ["redis-cluster"]
+    command: >-
+      redis-server --cluster-enabled yes --cluster-announce-hostname redis-replica
+      --cluster-preferred-endpoint-type hostname
+
+  redis-cluster-setup:
+    image: redis:7.2.3-alpine3.18
+    profiles: ["redis-cluster"]
+    depends_on: [redis-primary, redis-replica]
+    entrypoint: ["/bin/sh", "/seed/redis-cluster-setup.sh"]
+    volumes:
+      - ./dev/redis-cluster-setup.sh:/seed/redis-cluster-setup.sh:ro
+    restart: "no"
+
   dbgate-mongo:
     build: .
     image: cdp-dbgate:local
@@ -69,5 +93,26 @@ services:
       USER_ID: local-user
       DBGATE_ENGINE: redis
       REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_TLS: "false"
+
+  # Points at the replica, the case where DbGate's client gets MOVED.
+  dbgate-redis-cluster:
+    build: .
+    image: ${DBGATE_IMAGE:-cdp-dbgate:local}
+    profiles: ["redis-cluster"]
+    depends_on:
+      redis-cluster-setup:
+        condition: service_completed_successfully
+    ports:
+      - "8087:8085"
+    environment:
+      PORT: 8085
+      TOKEN: demo
+      SERVICE: demo-service
+      ENVIRONMENT: local
+      USER_ID: local-user
+      DBGATE_ENGINE: redis
+      REDIS_HOST: redis-replica
       REDIS_PORT: 6379
       REDIS_TLS: "false"
