@@ -13,7 +13,7 @@ const auditLogPath = path.join(
 )
 process.env.AUDIT_LOG_PATH = auditLogPath
 
-const { patchRedis, scopeScan } = require('../redis-audit-preload')
+const { patchRedis, scopeScan } = require('../redis-preload')
 
 function readLines() {
   if (!fs.existsSync(auditLogPath)) {

@@ -141,4 +141,4 @@ console.log(
   })
 )
 
-module.exports = { onCommand, patchRedis, scopeScan }
+module.exports = { patchRedis, scopeScan }

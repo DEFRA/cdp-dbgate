@@ -15,7 +15,7 @@ WORKDIR /home/dbgate-docker
 # Fail the build if DbGate no longer has the line we insert after.
 RUN sed -i "/window.dbgate_page = '';/a try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false'); } catch (e) {}" public/index.html \
  && grep -q "dbgateUsageAnalyticsConsent" public/index.html
-COPY audit-log.js mongo-audit-preload.js redis-audit-preload.js /opt/cdp-audit/
+COPY audit-log.js mongo-audit-preload.js redis-preload.js /opt/cdp-audit/
 COPY cloud-stub.js redis-primary.js /opt/cdp/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

@@ -9,7 +9,9 @@ mkdir -p "$audit_path"
 
 _term() {
   echo "caught shutdown signal, stopping dbgate"
-  kill -TERM "${child:-}" 2>/dev/null || true
+  # A signal during startup (e.g. the redis-primary.js probe) arrives before DbGate exists: exit, don't start it.
+  [ -n "${child:-}" ] || exit 143
+  kill -TERM "$child" 2>/dev/null || true
 }
 
 trap _term SIGTERM
@@ -70,12 +72,12 @@ case "${DBGATE_ENGINE}" in
     primary="$(node /opt/cdp/redis-primary.js || true)"
     export SERVER_redis="${primary:-${REDIS_HOST}}"
 
-    # Matches the default service ACL (`~<service>:*`). See redis-audit-preload.js.
-    export REDIS_SCAN_PREFIX="${REDIS_SCAN_PREFIX:-${SERVICE}:}"
+    # Matches the default service ACL (`~<service>:*`). See redis-preload.js.
+    export REDIS_SCAN_PREFIX="${SERVICE}:"
 
-    # Log Redis commands to stdout and AUDIT_LOG_PATH. See redis-audit-preload.js.
+    # Log Redis commands to stdout and AUDIT_LOG_PATH. See redis-preload.js.
     export AUDIT_LOG_PATH="${audit_path}/redis.audit"
-    export NODE_OPTIONS="--require /opt/cdp-audit/redis-audit-preload.js${NODE_OPTIONS:+ ${NODE_OPTIONS}}"
+    export NODE_OPTIONS="--require /opt/cdp-audit/redis-preload.js${NODE_OPTIONS:+ ${NODE_OPTIONS}}"
     ;;
   *)
     echo "invalid DBGATE_ENGINE '${DBGATE_ENGINE}', expected 'mongo' or 'redis'" >&2
