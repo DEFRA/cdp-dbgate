@@ -14,6 +14,7 @@ const auditLogPath = path.join(
 process.env.AUDIT_LOG_PATH = auditLogPath
 
 const { patchRedis, scopeScan } = require('../redis-preload')
+const { patchDriver } = require('../redis-key-browser')
 
 function readLines() {
   if (!fs.existsSync(auditLogPath)) {
@@ -81,9 +82,9 @@ function withScanPrefix(prefix, fn) {
 
 test('scan for every key only lists the service prefix', () => {
   withScanPrefix('svc:', () => {
-    const command = { name: 'scan', args: ['0', 'MATCH', '*', 'COUNT', '100'] }
+    const command = { name: 'scan', args: ['0', 'MATCH', '*'] }
     scopeScan(command)
-    assert.deepEqual(command.args, ['0', 'MATCH', 'svc:*', 'COUNT', '100'])
+    assert.deepEqual(command.args, ['0', 'MATCH', 'svc:*'])
   })
 })
 
@@ -125,6 +126,178 @@ test('scan without MATCH gets one for the service prefix', () => {
     scopeScan(command)
     assert.deepEqual(command.args, ['0', 'MATCH', 'svc:*'])
   })
+})
+
+test('a COUNT typed in the query tab is respected', () => {
+  withScanPrefix('svc:', () => {
+    const command = { name: 'scan', args: ['0', 'MATCH', '*', 'COUNT', '10'] }
+    scopeScan(command)
+    assert.deepEqual(command.args, ['0', 'MATCH', 'svc:*', 'COUNT', '10'])
+  })
+})
+
+// Serves `pages` in order; each page is the keys found before the next cursor. Like DbGate's driver,
+// it sends SCAN, DBSIZE and a TYPE per key through ioredis, after an await.
+function fakeRedisPlugin(pages = [[]], onScan = () => {}) {
+  const calls = []
+  const redis = new FakeRedis()
+  const driver = {
+    async scanKeys(dbhan, pattern, cursor, count) {
+      calls.push({ cursor, count })
+      onScan()
+      const index = calls.length - 1
+      if (pages[index] instanceof Error) {
+        throw pages[index]
+      }
+      const nextCursor = index + 1 < pages.length ? String(index + 1) : '0'
+      await Promise.resolve()
+      redis.sendCommand({ name: 'scan', args: [cursor, 'MATCH', '*'] })
+      redis.sendCommand({ name: 'dbsize', args: [] })
+      await Promise.resolve()
+      for (const key of pages[index]) {
+        redis.sendCommand({ name: 'type', args: [key] })
+      }
+      return { nextCursor, keys: pages[index].map((key) => ({ key })) }
+    }
+  }
+  return { plugin: { drivers: [driver] }, driver, calls }
+}
+
+test("the key browser keeps scanning past empty pages until it finds the service's keys", async () => {
+  const { plugin, driver, calls } = fakeRedisPlugin([[], [], ['svc:a']])
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2000)
+
+  assert.deepEqual(calls, [
+    { cursor: '0', count: 2000 },
+    { cursor: '1', count: 2000 },
+    { cursor: '2', count: 2000 }
+  ])
+  assert.deepEqual(page, { nextCursor: '0', keys: [{ key: 'svc:a' }] })
+})
+
+test('the key browser stops at the end of the keyspace even with no keys', async () => {
+  const { plugin, driver, calls } = fakeRedisPlugin([[], []])
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2000)
+
+  assert.equal(calls.length, 2)
+  assert.deepEqual(page, { nextCursor: '0', keys: [] })
+})
+
+test('the key browser hands back an empty page when the scan times out', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] })
+  const { plugin, driver, calls } = fakeRedisPlugin(
+    [[], [], [], ['svc:a']],
+    () => t.mock.timers.tick(3000)
+  )
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2000)
+
+  assert.equal(calls.length, 2)
+  assert.deepEqual(page, { nextCursor: '2', keys: [] })
+})
+
+test('a newer key browser scan on the same connection stops the older one after its page', async () => {
+  const { plugin, driver, calls } = fakeRedisPlugin([[], [], [], ['svc:a']])
+  patchDriver(plugin)
+  const dbhan = {}
+
+  const older = driver.scanKeys(dbhan, 'a', '0', 2000)
+  const newer = driver.scanKeys(dbhan, 'ab', '0', 2000)
+
+  assert.deepEqual(await older, { nextCursor: '1', keys: [] })
+  assert.deepEqual(await newer, { nextCursor: '0', keys: [{ key: 'svc:a' }] })
+  assert.equal(calls.length, 4)
+})
+
+test('key browser scans on different connections do not stop each other', async () => {
+  const { plugin, driver } = fakeRedisPlugin([
+    [],
+    [],
+    [],
+    [],
+    ['svc:a'],
+    ['svc:b']
+  ])
+  patchDriver(plugin)
+
+  const pages = await Promise.all([
+    driver.scanKeys({}, '', '0', 2000),
+    driver.scanKeys({}, '', '0', 2000)
+  ])
+
+  assert.deepEqual(
+    pages.map((page) => page.keys.length),
+    [1, 1]
+  )
+})
+
+test('"Scan all" sends no count and makes one call', async () => {
+  const { plugin, driver, calls } = fakeRedisPlugin([[], ['svc:a']])
+  patchDriver(plugin)
+
+  await driver.scanKeys({}, '', '0', undefined)
+
+  assert.deepEqual(calls, [{ cursor: '0', count: undefined }])
+})
+
+test('a key browser page is audited as one line listing its keys', async () => {
+  const { plugin, driver } = fakeRedisPlugin([[], ['svc:a', 'svc:b']])
+  patchDriver(plugin)
+  const before = readLines().length
+
+  await driver.scanKeys({}, 'svc', '0', 2000)
+
+  const lines = readLines().slice(before)
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].commandName, 'scanKeys')
+  assert.deepEqual(lines[0].args, {
+    filter: 'svc',
+    cursor: '0',
+    pages: 2,
+    nextCursor: '0',
+    keys: ['svc:a', 'svc:b']
+  })
+})
+
+test('a query tab command sent during a key browser scan is still audited', async () => {
+  const { plugin, driver } = fakeRedisPlugin([['svc:a']])
+  patchDriver(plugin)
+  const before = readLines().length
+
+  const scan = driver.scanKeys({}, '', '0', 2000)
+  new FakeRedis().sendCommand({ name: 'get', args: ['svc:b'] })
+  await scan
+
+  const names = readLines()
+    .slice(before)
+    .map((line) => line.commandName)
+  assert.deepEqual(names, ['get', 'scanKeys'])
+})
+
+test('a failed key browser scan is audited with its error', async () => {
+  const { plugin, driver } = fakeRedisPlugin([[], new Error('NOPERM')])
+  patchDriver(plugin)
+
+  await assert.rejects(driver.scanKeys({}, '', '0', 2000), /NOPERM/)
+
+  const line = readLines().at(-1)
+  assert.equal(line.commandName, 'scanKeys')
+  assert.equal(line.error, 'NOPERM')
+  assert.deepEqual(line.args, { filter: '', cursor: '0', pages: 1 })
+})
+
+test('patching the driver twice does not wrap it twice', () => {
+  const { plugin, driver } = fakeRedisPlugin()
+  patchDriver(plugin)
+  const patched = driver.scanKeys
+  patchDriver(plugin)
+
+  assert.equal(driver.scanKeys, patched)
 })
 
 test('another service prefix is searched inside ours, so it finds nothing', () => {
