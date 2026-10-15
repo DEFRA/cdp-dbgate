@@ -136,7 +136,7 @@ test('a COUNT typed in the query tab is respected', () => {
   })
 })
 
-// Serves `pages` in order; each page is the keys found before the next cursor. Like DbGate's driver,
+// Serves `pages` in order, then empty pages; each page is the keys found before the next cursor. Like DbGate's driver,
 // it sends SCAN, DBSIZE and a TYPE per key through ioredis, after an await.
 function fakeRedisPlugin(pages = [[]], onScan = () => {}) {
   const calls = []
@@ -149,21 +149,22 @@ function fakeRedisPlugin(pages = [[]], onScan = () => {}) {
       if (pages[index] instanceof Error) {
         throw pages[index]
       }
+      const keys = pages[index] ?? []
       const nextCursor = index + 1 < pages.length ? String(index + 1) : '0'
       await Promise.resolve()
       redis.sendCommand({ name: 'scan', args: [cursor, 'MATCH', '*'] })
       redis.sendCommand({ name: 'dbsize', args: [] })
       await Promise.resolve()
-      for (const key of pages[index]) {
+      for (const key of keys) {
         redis.sendCommand({ name: 'type', args: [key] })
       }
-      return { nextCursor, keys: pages[index].map((key) => ({ key })) }
+      return { nextCursor, keys: keys.map((key) => ({ key })) }
     }
   }
   return { plugin: { drivers: [driver] }, driver, calls }
 }
 
-test("the key browser keeps scanning past empty pages until it finds the service's keys", async () => {
+test('the key browser keeps scanning past empty pages to the end of the keyspace', async () => {
   const { plugin, driver, calls } = fakeRedisPlugin([[], [], ['svc:a']])
   patchDriver(plugin)
 
@@ -234,6 +235,88 @@ test('key browser scans on different connections do not stop each other', async 
     pages.map((page) => page.keys.length),
     [1, 1]
   )
+})
+
+test('the key browser merges the keys of every page it scans', async () => {
+  const { plugin, driver, calls } = fakeRedisPlugin([['svc:a'], [], ['svc:b']])
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2000)
+
+  assert.equal(calls.length, 3)
+  assert.deepEqual(page, {
+    nextCursor: '0',
+    keys: [{ key: 'svc:a' }, { key: 'svc:b' }]
+  })
+})
+
+test('the key browser stops once it has a page of keys, so "Scan more" carries on', async () => {
+  const { plugin, driver, calls } = fakeRedisPlugin([
+    ['svc:a'],
+    ['svc:b'],
+    ['svc:c']
+  ])
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2)
+
+  assert.equal(calls.length, 2)
+  assert.deepEqual(page, {
+    nextCursor: '2',
+    keys: [{ key: 'svc:a' }, { key: 'svc:b' }]
+  })
+})
+
+test('the key browser keeps scanning after keys turn up until time runs out', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'] })
+  const { plugin, driver, calls } = fakeRedisPlugin(
+    [['svc:a'], [], ['svc:b'], ['svc:c']],
+    () => t.mock.timers.tick(2000)
+  )
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2000)
+
+  assert.equal(calls.length, 3)
+  assert.deepEqual(page, {
+    nextCursor: '3',
+    keys: [{ key: 'svc:a' }, { key: 'svc:b' }]
+  })
+})
+
+test('a superseded key browser scan hands the UI no keys but still audits them', async () => {
+  const { plugin, driver } = fakeRedisPlugin([['svc:a'], [], [], ['svc:b']])
+  patchDriver(plugin)
+  const dbhan = {}
+  const before = readLines().length
+
+  const older = driver.scanKeys(dbhan, '', '0', 2000)
+  const newer = driver.scanKeys(dbhan, 'svc', '0', 2000)
+
+  assert.deepEqual(await older, { nextCursor: '1', keys: [] })
+  await newer
+  const olderLine = readLines()
+    .slice(before)
+    .find((line) => line.args.filter === '')
+  assert.deepEqual(olderLine.args.keys, ['svc:a'])
+})
+
+test('a key browser page that fails after keys turned up returns those keys', async () => {
+  const { plugin, driver } = fakeRedisPlugin([['svc:a'], new Error('MOVED')])
+  patchDriver(plugin)
+
+  const page = await driver.scanKeys({}, '', '0', 2000)
+
+  assert.deepEqual(page, { nextCursor: '1', keys: [{ key: 'svc:a' }] })
+  const line = readLines().at(-1)
+  assert.equal(line.error, 'MOVED')
+  assert.deepEqual(line.args, {
+    filter: '',
+    cursor: '0',
+    pages: 1,
+    nextCursor: '1',
+    keys: ['svc:a']
+  })
 })
 
 test('"Scan all" sends no count and makes one call', async () => {
