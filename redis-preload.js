@@ -1,11 +1,13 @@
 'use strict'
 
 // Audit Redis commands to stdout (docker logs / Firelens) and to AUDIT_LOG_PATH,
-// which entrypoint.sh uploads on shutdown. Also scopes SCAN to REDIS_SCAN_PREFIX.
+// which entrypoint.sh uploads on shutdown. Also scopes SCAN to REDIS_SCAN_PREFIX, and patches the
+// key browser (see redis-key-browser.js).
 // Loaded via NODE_OPTIONS=--require before DbGate starts.
 
 const Module = require('module')
 const { audit, AUDIT_LOG_PATH } = require('./audit-log')
+const { isKeyBrowserScan, patchDriver } = require('./redis-key-browser')
 
 // `auth` and `hello` carry the password, so they must never be logged.
 const CREDENTIAL_COMMANDS = new Set(['auth', 'hello'])
@@ -73,7 +75,7 @@ function scopePattern(pattern, prefix) {
 
 function onCommand(command) {
   const name = String(command.name).toLowerCase()
-  if (SKIP.has(name)) {
+  if (SKIP.has(name) || isKeyBrowserScan()) {
     return
   }
 
@@ -114,21 +116,27 @@ function patchRedis(Redis) {
   console.log(JSON.stringify({ msg: 'redis.audit.patched', status: 'ok' }))
 }
 
-// Intercept require('ioredis') so every Redis client gets command auditing.
+// DbGate loads plugins by path: <plugins dir>/dbgate-plugin-redis/dist/backend.js.
+const REDIS_PLUGIN_PATH = /dbgate-plugin-redis[\\/]dist[\\/]backend\.js$/
+
+// Intercept require('ioredis') so every Redis client gets command auditing,
+// and the Redis plugin so the key browser scans until it finds keys.
 const originalRequire = Module.prototype.require
 Module.prototype.require = function (id) {
   const exported = originalRequire.apply(this, arguments)
-  if (id === 'ioredis') {
-    try {
+  try {
+    if (id === 'ioredis') {
       patchRedis(exported)
-    } catch (err) {
-      console.log(
-        JSON.stringify({
-          msg: 'redis.audit.patch.error',
-          error: err && err.message
-        })
-      )
+    } else if (REDIS_PLUGIN_PATH.test(String(id))) {
+      patchDriver(exported)
     }
+  } catch (err) {
+    console.log(
+      JSON.stringify({
+        msg: 'redis.audit.patch.error',
+        error: err && err.message
+      })
+    )
   }
   return exported
 }

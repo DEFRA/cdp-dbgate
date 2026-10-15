@@ -67,6 +67,13 @@ tab. For example, `*` becomes `cdp-portal-frontend:*`.
 This is for clarity, not security: the ACL is the control, and the terminal's `redis-cli` can still `SCAN` all key
 names. The key list's "Scanned X/Y" total comes from `DBSIZE` and is still cluster-wide.
 
+The service's keys are a small part of the shared keyspace, so DbGate's 2000-slot page is usually empty. The preload
+wraps the Redis driver's `scanKeys` to keep scanning 2000-slot pages until keys turn up, the cursor ends, or 5 seconds
+pass, so no single `SCAN` blocks the shared primary. "Scan all" is unchanged. A newer scan on the same connection
+(a filter change, Refresh, a key edit) stops the older one after its current page. DbGate still adds 2000 to
+"Scanned X/Y" per call, so after a scan that went through several pages the counter understates progress. See
+`redis-key-browser.js`.
+
 ## Audit logging
 
 Each engine has a preload that `entrypoint.sh` loads into DbGate with `NODE_OPTIONS=--require`. Both write through
@@ -78,6 +85,11 @@ Each engine has a preload that `entrypoint.sh` loads into DbGate with `NODE_OPTI
 | Redis  | `redis-preload.js`       | ioredis `Redis.prototype.sendCommand` | `redis.command` | `args`     | `auth`, `hello`, `ping`, `select`, `client`, `info`, `quit` |
 
 Redis `auth` and `hello` carry the password, so they are never logged.
+
+A key browser page sends `SCAN` and `DBSIZE` per page, then `TYPE` and up to 5 size commands per key. These only reveal
+key names, so they are audited as one `scanKeys` line per page instead, with `args` holding `filter`, the start
+`cursor`, `pages`, `nextCursor` and the listed `keys` (and `error` if it failed). Commands from the query tab and from
+opening a key are still logged one per line.
 
 - The full line, including the body field, goes to `AUDIT_LOG_PATH`, which `entrypoint.sh` sets to
   `/var/log/webshell/<engine>.audit`. This file is the audit record uploaded to S3.
