@@ -113,7 +113,8 @@ through the sidecar HTTP proxy, where that call fails and DbGate shows a toast (
 
 `entrypoint.sh` sets `LOCAL_DBGATE_CLOUD=1`, which makes DbGate call `http://localhost:3110` instead, and starts
 `cloud-stub.js` there to answer with empty data. `localhost` is added to `NO_PROXY` so the stub is reached directly.
-The image also turns off DbGate usage analytics at build time (see `Dockerfile`).
+The image also declines DbGate usage analytics and hides the "Upgrade to Premium" button at build time (see
+`Dockerfile`). The analytics part can become `USAGE_ANALYTICS=false` once the `dbgate/dbgate` image supports it.
 
 ## Local run (standalone, no other deps)
 

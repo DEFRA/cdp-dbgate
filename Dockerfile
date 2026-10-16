@@ -11,10 +11,13 @@ RUN npm init -y && npm install aws4
 ENV NODE_PATH=/opt/node-extra/node_modules
 
 WORKDIR /home/dbgate-docker
-# Decline usage analytics before bundle.js reads dbgateUsageAnalyticsConsent.
-# Fail the build if DbGate no longer has the line we insert after.
-RUN sed -i "/window.dbgate_page = '';/a try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false'); } catch (e) {}" public/index.html \
- && grep -q "dbgateUsageAnalyticsConsent" public/index.html
+# Decline usage analytics and hide the "Upgrade to Premium" button. Filled in at build time because DbGate's
+# PAGE_HEAD_SCRIPT is not applied on /<WEB_ROOT>/*.html. The greps fail the build if DbGate changes what this needs.
+# TODO: use USAGE_ANALYTICS=false once the dbgate/dbgate image supports it.
+RUN grep -q 'TabsPanel_buttonUpgrade' public/build/bundle.js \
+ && grep -q 'dbgateUsageAnalyticsConsent' public/build/bundle.js \
+ && sed -i "s|<!--HEAD_SCRIPT-->|<script>try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false') } catch (e) {}</script><style>[data-testid=TabsPanel_buttonUpgrade]{display:none !important}</style>|" public/*.html \
+ && grep -q 'dbgateUsageAnalyticsConsent' public/index.html
 COPY audit-log.js mongo-audit-preload.js redis-preload.js redis-key-browser.js /opt/cdp-audit/
 COPY cloud-stub.js redis-primary.js /opt/cdp/
 COPY entrypoint.sh /entrypoint.sh
