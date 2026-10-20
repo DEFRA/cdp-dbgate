@@ -116,6 +116,10 @@ through the sidecar HTTP proxy, where that call fails and DbGate shows a toast (
 The image also declines DbGate usage analytics and hides the "Upgrade to Premium" button at build time (see
 `Dockerfile`). The analytics part can become `USAGE_ANALYTICS=false` once the `dbgate/dbgate` image supports it.
 
+All sessions share one browser origin, so DbGate would reopen the previous session's tabs, possibly for another
+service. `page-head.js` keeps DbGate's browser storage in memory, so every page load starts clean. A reload loses open
+tabs.
+
 ## Local run (standalone, no other deps)
 
 This starts only `cdp-dbgate`, Mongo and Redis from this repository. Pick one or both with a profile:
