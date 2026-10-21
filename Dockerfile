@@ -11,13 +11,18 @@ RUN npm init -y && npm install aws4
 ENV NODE_PATH=/opt/node-extra/node_modules
 
 WORKDIR /home/dbgate-docker
-# Decline usage analytics and hide the "Upgrade to Premium" button. Filled in at build time because DbGate's
+COPY page-head.js /tmp/page-head.js
+# Inline page-head.js (in-memory browser storage, analytics opt-out) and hide the "Upgrade to Premium" button. Inlined,
+# not loaded with <script src>, so DbGate never runs without it. Filled in at build time because DbGate's
 # PAGE_HEAD_SCRIPT is not applied on /<WEB_ROOT>/*.html. The greps fail the build if DbGate changes what this needs.
-# TODO: use USAGE_ANALYTICS=false once the dbgate/dbgate image supports it.
 RUN grep -q 'TabsPanel_buttonUpgrade' public/build/bundle.js \
  && grep -q 'dbgateUsageAnalyticsConsent' public/build/bundle.js \
- && sed -i "s|<!--HEAD_SCRIPT-->|<script>try { localStorage.setItem('dbgateUsageAnalyticsConsent', 'false') } catch (e) {}</script><style>[data-testid=TabsPanel_buttonUpgrade]{display:none !important}</style>|" public/*.html \
- && grep -q 'dbgateUsageAnalyticsConsent' public/index.html
+ && grep -q 'localforage' public/build/bundle.js \
+ && grep -q 'openDatabase' public/build/bundle.js \
+ && { echo '<script>'; cat /tmp/page-head.js; echo '</script><style>[data-testid=TabsPanel_buttonUpgrade]{display:none !important}</style>'; } > /tmp/page-head.html \
+ && sed -i -e '/<!--HEAD_SCRIPT-->/{r /tmp/page-head.html' -e 'd}' public/*.html \
+ && grep -q 'dbgateUsageAnalyticsConsent' public/index.html \
+ && rm /tmp/page-head.js /tmp/page-head.html
 COPY audit-log.js mongo-audit-preload.js redis-preload.js redis-key-browser.js /opt/cdp-audit/
 COPY cloud-stub.js redis-primary.js /opt/cdp/
 COPY entrypoint.sh /entrypoint.sh
