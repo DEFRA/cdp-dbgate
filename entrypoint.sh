@@ -85,6 +85,25 @@ case "${DBGATE_ENGINE}" in
     ;;
 esac
 
+# Hide menu items that do nothing in a single-database session (e.g. File > New SQLite database). Every DbGate menu
+# entry hides disabled commands. app.resetSettings is disabled too, as it deletes this file. See README.
+dbgate_datadir="${WORKSPACE_DIR:-${HOME}/.dbgate}"
+mkdir -p "$dbgate_datadir"
+cat > "${dbgate_datadir}/settings.json" <<'EOF'
+{
+  "commands": {
+    "new.sqliteDatabase": { "enabled": false },
+    "new.duckdbDatabase": { "enabled": false },
+    "new.application": { "enabled": false },
+    "new.jsonl": { "enabled": false },
+    "new.modelTransform": { "enabled": false },
+    "new.modelCompare": { "enabled": false },
+    "app.checkForUpdates": { "enabled": false },
+    "app.resetSettings": { "enabled": false }
+  }
+}
+EOF
+
 echo "starting dbgate ENGINE=${DBGATE_ENGINE} PORT=${PORT} WEB_ROOT=${WEB_ROOT} SERVICE=${SERVICE} ENVIRONMENT=${ENVIRONMENT}"
 
 # DbGate call api.dbgate.cloud on every UI load (public files + promo widget). Through the CDP forwarder that fails

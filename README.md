@@ -120,6 +120,30 @@ All sessions share one browser origin, so DbGate would reopen the previous sessi
 service. `page-head.js` keeps DbGate's browser storage in memory, so every page load starts clean. A reload loses open
 tabs.
 
+## Hidden menu items
+
+Each session is locked to one database, so some DbGate menu items do nothing, e.g. **File > New SQLite database**
+creates a file the UI never shows. Before DbGate starts, `entrypoint.sh` writes `settings.json` to DbGate's data
+directory (`$WORKSPACE_DIR`, default `~/.dbgate`) with these commands disabled. DbGate hides disabled commands in its
+menus and ignores their keyboard shortcuts.
+
+| Command               | Menu item                            |
+| --------------------- | ------------------------------------ |
+| `new.sqliteDatabase`  | File > New SQLite database           |
+| `new.duckdbDatabase`  | File > New DuckDB database           |
+| `new.application`     | File > New application               |
+| `new.jsonl`           | File > New JSON lines file           |
+| `new.modelTransform`  | File > New model transform           |
+| `new.modelCompare`    | Tools > Compare DB                   |
+| `app.checkForUpdates` | Help > Check for updates             |
+| `app.resetSettings`   | Tools > Reset layout data & settings |
+
+`app.resetSettings` deletes `settings.json`, which would bring the other items back. Command ids are in DbGate's
+`app/src/mainMenuDefinition.js` and `packages/web/src/commands/stdCommands.ts`.
+
+This is for clarity, not security: a user can turn the items back on in DbGate's settings. Server-side features that
+matter (shell scripting, new connections) are already off in this image.
+
 ## Local run (standalone, no other deps)
 
 This starts only `cdp-dbgate`, Mongo and Redis from this repository. Pick one or both with a profile:
