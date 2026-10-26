@@ -12,13 +12,13 @@ ENV NODE_PATH=/opt/node-extra/node_modules
 
 WORKDIR /home/dbgate-docker
 COPY page-head.js /tmp/page-head.js
-# Inline page-head.js (in-memory browser storage, analytics opt-out) and hide the "Upgrade to Premium" button. Inlined,
-# not loaded with <script src>, so DbGate never runs without it. Filled in at build time because DbGate's
-# PAGE_HEAD_SCRIPT is not applied on /<WEB_ROOT>/*.html. The greps fail the build if DbGate changes what this needs.
+# Inline page-head.js and hide the Upgrade button at build time (PAGE_HEAD_SCRIPT is not applied under WEB_ROOT).
+# The greps fail the build if DbGate drops something this image relies on, incl. commandsSettings for entrypoint.sh.
 RUN grep -q 'TabsPanel_buttonUpgrade' public/build/bundle.js \
  && grep -q 'dbgateUsageAnalyticsConsent' public/build/bundle.js \
  && grep -q 'localforage' public/build/bundle.js \
  && grep -q 'openDatabase' public/build/bundle.js \
+ && grep -q 'commandsSettings' public/build/bundle.js \
  && { echo '<script>'; cat /tmp/page-head.js; echo '</script><style>[data-testid=TabsPanel_buttonUpgrade]{display:none !important}</style>'; } > /tmp/page-head.html \
  && sed -i -e '/<!--HEAD_SCRIPT-->/{r /tmp/page-head.html' -e 'd}' public/*.html \
  && grep -q 'dbgateUsageAnalyticsConsent' public/index.html \
